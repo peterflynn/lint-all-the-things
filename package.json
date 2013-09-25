@@ -1,0 +1,9 @@
+{
+    "name": "pflynn.lint-ALL-the-things",
+    "title": "Lint ALL the Things",
+    "homepage": "https://github.com/peterflynn/brackets-lint-all-the-things",
+    "author": "Peter Flynn",
+    "version": "1.0.0",
+    "engines": { "brackets": ">=0.32" },
+    "description": "Lint everything in your project at once! Optionally filter out certain files or folders, and see all the rest in a consolidated report. To get started, choose \"View > Lint Whole Project\"."
+}
