@@ -21,8 +21,8 @@
  */
 
 
-/*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4 */
-/*global define, brackets, $, CSSLint, jsonlint */
+/*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, es5: true */
+/*global define, brackets, $, Mustache */
 
 define(function (require, exports, module) {
     "use strict";
@@ -32,18 +32,22 @@ define(function (require, exports, module) {
         CommandManager      = brackets.getModule("command/CommandManager"),
         Commands            = brackets.getModule("command/Commands"),
         Menus               = brackets.getModule("command/Menus"),
+        PanelManager        = brackets.getModule("view/PanelManager"),
         FileIndexManager    = brackets.getModule("project/FileIndexManager"),
         ProjectManager      = brackets.getModule("project/ProjectManager"),
         NativeFileSystem    = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
         EditorManager       = brackets.getModule("editor/EditorManager"),
+        ExtensionUtils      = brackets.getModule("utils/ExtensionUtils"),
         CollectionUtils     = brackets.getModule("utils/CollectionUtils"),
-        Async               = brackets.getModule("utils/Async"),
         StringUtils         = brackets.getModule("utils/StringUtils"),
+        Async               = brackets.getModule("utils/Async"),
         Dialogs             = brackets.getModule("widgets/Dialogs");
     
     
+    var resultsPanel;
+    
     /* E.g., for Brackets core-team-owned source:
-            /extensions/dev/       (want to exclude any personal code...)
+            /extensions/dev/
             /thirdparty/
             /3rdparty/
             /node_modules/
@@ -77,20 +81,84 @@ define(function (require, exports, module) {
     }
     
     
+    function destroyPanel() {
+        resultsPanel.hide();
+        resultsPanel.$panel.remove();
+        resultsPanel = null;
+    }
+    
     /** Shows a large message in a dialog with a scrolling panel. Based on BracketsReports extension. */
-    function showResult(title, message) {
-        var html = "<div style='-webkit-user-select:text; cursor: auto; padding:10px; max-height:250px; overflow:auto'>";
+    function showResult(fileList, totalErrors) {
         
-        message = StringUtils.htmlEscape(message);
-        message = message.replace(/\n/g, "<br>");
-        message = message.replace(/ {2}/g, " &nbsp;");
-        message = message.replace(/\t/g, "&nbsp;&nbsp;&nbsp;&nbsp;");
-        html += message;
+        // (Adapted from the CodeInspection & FindInFiles code)
+        var panelHtml = "<div id='allproblems-panel' class='bottom-panel vert-resizable top-resizer'>\
+                            <div class='toolbar simple-toolbar-layout'>\
+                                <div class='title'></div>\
+                                <a href='#' class='close'>&times;</a>\
+                            </div>\
+                            <div class='table-container resizable-content'></div>\
+                        </div>";
+        var template = "<table class='bottom-panel-table table table-striped table-condensed row-highlight'>\
+                            <tbody>\
+                                {{#fileList}}\
+                                <tr class='file-section'>\
+                                    <td colspan='3'><span class='disclosure-triangle expanded'></span><span class='dialog-filename'>{{displayPath}}</span></td>\
+                                </tr>\
+                                {{#errors}}\
+                                <tr data-fullpath='{{fullPath}}'>\
+                                    <td class='line-number' data-character='{{pos.ch}}'>{{friendlyLine}}</td>\
+                                    <td>{{message}}</td>\
+                                    <td>{{codeSnippet}}</td>\
+                                </tr>\
+                                {{/errors}}\
+                                {{/fileList}}\
+                            </tbody>\
+                        </table>";
         
-        html += "</div>";
+        resultsPanel = PanelManager.createBottomPanel("all-problems", $(panelHtml), 100);
         
-        Dialogs.showModalDialog(Dialogs.DIALOG_ID_ERROR, title, html)
-            .done(function () { EditorManager.focusEditor(); });
+        var $selectedRow;
+        var $tableContainer = resultsPanel.$panel.find(".table-container")
+            .on("click", "tr", function (e) {
+                var $row = $(e.currentTarget);
+                if ($selectedRow) {
+                    $selectedRow.removeClass("selected");
+                }
+                $selectedRow = $row;
+                $selectedRow.addClass("selected");
+                
+                if ($row.hasClass("file-section")) {
+                    // Clicking the file section header collapses/expands result rows for that file
+                    $row.nextUntil(".file-section").toggle();
+                    
+                    var $triangle = $(".disclosure-triangle", $row);
+                    $triangle.toggleClass("expanded").toggleClass("collapsed");
+                    
+                } else {
+                    // Clicking individual error jumps to that line of code
+                    var $lineTd   = $selectedRow.find(".line-number"),
+                        line      = parseInt($lineTd.text(), 10) - 1,  // convert friendlyLine back to pos.line
+                        character = $lineTd.data("character"),
+                        fullPath  = $selectedRow.data("fullpath");
+    
+                    CommandManager.execute(Commands.FILE_OPEN, {fullPath: fullPath})
+                        .done(function (doc) {
+                            // Opened document is now the current main editor
+                            EditorManager.getCurrentFullEditor().setCursorPos(line, character, true);
+                        });
+                }
+            });
+
+        $("#allproblems-panel .close").click(function () {
+            destroyPanel();
+        });
+        
+        var tableHtml = Mustache.render(template, {fileList: fileList});
+        $tableContainer.append(tableHtml);
+        
+        resultsPanel.$panel.find(".title").text("Project Linting - " + totalErrors + " problems in " + fileList.length + " files");
+        
+        resultsPanel.show();
     }
     
     
@@ -140,8 +208,7 @@ define(function (require, exports, module) {
                 filterStrings = substrings.split("\n");
                 filterStrings = filterStrings.map(function (substr) {
                     return substr.trim();
-                });
-                filterStrings = filterStrings.filter(function (substr) {
+                }).filter(function (substr) {
                     return substr !== "";
                 });
             }
@@ -159,42 +226,74 @@ define(function (require, exports, module) {
     }
     
     function lintAll() {
+        if (resultsPanel) {  // close prev results, if any
+            destroyPanel();
+        }
+        
         getExclusions().done(function (btnId) {
             if (btnId !== Dialogs.DIALOG_BTN_OK) {  // i.e. dialog's "X" button
                 return;
             }
             
+            // TODO: show progress UI? or just set statusbar spinner?
             var progressCallbacks = {
                 begin: function (totalFiles) { console.log("Need to lint " + totalFiles + " files"); },
                 increment: function () {}
             };
             
             getAllResults(progressCallbacks).done(function (results) {
-                var runningTotal = 0,
-                    filesTotal = 0,
-                    message = "";
+                
+                // Convert the results into a format digestible by showResult()
+                var totalErrors = 0,
+                    fileList = [];
+                
                 CollectionUtils.forEach(results, function (oneResult, fullPath) {
-                    message += ProjectManager.makeProjectRelativeIfPossible(fullPath) + ":\n";
-                    oneResult.errors.forEach(function (error) {
-                        message += "    " + error.pos.line + ": " + error.message + "\n";
+                    var fileResult = {
+                        fullPath: fullPath,
+                        displayPath: ProjectManager.makeProjectRelativeIfPossible(fullPath),
+                        errors: oneResult.errors
+                    };
+                    oneResult.errors.forEach(function (error) {  // (code borrowed from CodeInspection)
+                        error.friendlyLine = error.pos.line + 1;
+                        error.codeSnippet = "";  // TODO... read file a 2nd time?
                     });
-                    filesTotal++;
-                    runningTotal += oneResult.errors.length;
-                    message += "\n";
+                    fileList.push(fileResult);
+                    totalErrors += oneResult.errors.length;
                 });
                 
-                if (runningTotal === 0) {
-                    message = "Awesome job! No lint problems here.";
+                if (totalErrors === 0) {
+                    // TODO: add green checkmark icon?
+                    Dialogs.showModalDialog(Dialogs.DIALOG_ID_ERROR, "Project Linting", "Awesome job! No lint problems here.")
+                        .done(function () { EditorManager.focusEditor(); });
+                    
                 } else {
-                    // Prepend summary
-                    message = runningTotal + " lint problems in " + filesTotal + " files.\n\n" + message;
+                    showResult(fileList, totalErrors);
                 }
                 
-                // TODO: show in footer panel a la Find All, making it easy to jump to each offending line
-                showResult("Lint Results", message);
             });
         });
     }
+    
+    
+    // (adapted from brackets.less)
+    ExtensionUtils.addEmbeddedStyleSheet(
+        "#allproblems-panel .disclosure-triangle {\
+            background-image: url('styles/images/jsTreeSprites.svg');\
+            background-repeat: no-repeat;\
+            background-color: transparent;\
+            vertical-align: middle;\
+            width: 18px;\
+            height: 18px;\
+            display: inline-block;\
+        }\
+        #allproblems-panel .disclosure-triangle.expanded {\
+            background-position: 7px 5px;\
+            -webkit-transform: translateZ(0) rotate(90deg);\
+        }\
+        #allproblems-panel .disclosure-triangle.collapsed {\
+            background-position: 7px 5px;\
+        }"
+    );
     
     
     var COMMAND_ID = "pflynn.lint-ALL-the-things";
