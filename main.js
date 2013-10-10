@@ -41,6 +41,7 @@ define(function (require, exports, module) {
         CollectionUtils     = brackets.getModule("utils/CollectionUtils"),
         StringUtils         = brackets.getModule("utils/StringUtils"),
         Async               = brackets.getModule("utils/Async"),
+        StatusBar           = brackets.getModule("widgets/StatusBar"),
         Dialogs             = brackets.getModule("widgets/Dialogs");
     
     
@@ -52,7 +53,6 @@ define(function (require, exports, module) {
             /3rdparty/
             /node_modules/
             /widgets/bootstrap-
-            /brackets/tasks/
             /unittest-files/
             /spec/JSUtils-test-files/
             /spec/CSSUtils-test-files/
@@ -60,11 +60,6 @@ define(function (require, exports, module) {
             /spec/NodeConnection-test-files/
             /spec/ExtensionLoader-test-files/
             /perf/OpenFile-perf-files/
-            
-            /samples/_disabled/
-            TokenStream w
-            JSUtils w
-            test quickedit
      */
     var filterStrings = [];
     
@@ -88,7 +83,7 @@ define(function (require, exports, module) {
     }
     
     /** Shows a large message in a dialog with a scrolling panel. Based on BracketsReports extension. */
-    function showResult(fileList, totalErrors) {
+    function showResult(fileList, totalErrors, indeterminate) {
         
         // (Adapted from the CodeInspection & FindInFiles code)
         var panelHtml = "<div id='allproblems-panel' class='bottom-panel vert-resizable top-resizer'>\
@@ -156,7 +151,8 @@ define(function (require, exports, module) {
         var tableHtml = Mustache.render(template, {fileList: fileList});
         $tableContainer.append(tableHtml);
         
-        resultsPanel.$panel.find(".title").text("Project Linting - " + totalErrors + " problems in " + fileList.length + " files");
+        var numStr = totalErrors + (indeterminate ? "+" : "");
+        resultsPanel.$panel.find(".title").text("Project Linting - " + numStr + " problems in " + fileList.length + " files");
         
         resultsPanel.show();
     }
@@ -169,7 +165,7 @@ define(function (require, exports, module) {
         var lintables = [];
         FileIndexManager.getFileInfoList("all").done(function (fileInfos) {
             fileInfos.forEach(function (fileInfo) {
-                if (filter(fileInfo) && CodeInspection.getProvider({ fullPath: fileInfo.fullPath })) {
+                if (filter(fileInfo)) {  // TODO: also exclude if ".min.js" in name
                     lintables.push(fileInfo.fullPath);
                 }
             });
@@ -200,7 +196,7 @@ define(function (require, exports, module) {
     function getExclusions() {
         var $textarea;
         var message = "Exclude files/folders containing any of these substrings:<br><textarea id='lint-excludes' style='width:400px;height:160px'></textarea>";
-        var promise = Dialogs.showModalDialog(Dialogs.DIALOG_ID_ERROR, "Project Linting", message);
+        var promise = Dialogs.showModalDialog(Dialogs.DIALOG_ID_ERROR, "Lint All the Things", message);
         
         promise.done(function (btnId) {
             if (btnId === Dialogs.DIALOG_BTN_OK) {  // as opposed so dialog's "X" button
@@ -235,16 +231,18 @@ define(function (require, exports, module) {
                 return;
             }
             
-            // TODO: show progress UI? or just set statusbar spinner?
+            StatusBar.showBusyIndicator();
+            
+            // TODO: show progress bar?
             var progressCallbacks = {
                 begin: function (totalFiles) { console.log("Need to lint " + totalFiles + " files"); },
                 increment: function () {}
             };
             
             getAllResults(progressCallbacks).done(function (results) {
-                
                 // Convert the results into a format digestible by showResult()
                 var totalErrors = 0,
+                    anyAborted = false,
                     fileList = [];
                 
                 CollectionUtils.forEach(results, function (oneResult, fullPath) {
@@ -259,6 +257,7 @@ define(function (require, exports, module) {
                     });
                     fileList.push(fileResult);
                     totalErrors += oneResult.errors.length;
+                    anyAborted = anyAborted || oneResult.aborted;
                 });
                 
                 if (totalErrors === 0) {
@@ -267,10 +266,11 @@ define(function (require, exports, module) {
                         .done(function () { EditorManager.focusEditor(); });
                     
                 } else {
-                    showResult(fileList, totalErrors);
+                    showResult(fileList, totalErrors, anyAborted);
                 }
                 
-            });
+            })
+                .always(function () { StatusBar.hideBusyIndicator(); });
         });
     }
     
