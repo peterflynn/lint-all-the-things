@@ -1,6 +1,6 @@
 "Lint _All_ the Things" for Brackets
 ====================================
-Lint everything in your project at once! Optionally filter out certain files or folders, and see all the rest in a consolidated report.
+Lint everything in your project in one batch! Optionally filter out certain files or folders, and see all the rest in a consolidated report.
 
 To get started, just choose _View > Lint Whole Project_.
 
