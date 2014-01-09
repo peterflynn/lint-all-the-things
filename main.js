@@ -28,17 +28,15 @@ define(function (require, exports, module) {
     "use strict";
     
     // Brackets modules
-    var CodeInspection      = brackets.getModule("language/CodeInspection"),
+    var _                   = brackets.getModule("thirdparty/lodash"),
+        CodeInspection      = brackets.getModule("language/CodeInspection"),
         CommandManager      = brackets.getModule("command/CommandManager"),
         Commands            = brackets.getModule("command/Commands"),
         Menus               = brackets.getModule("command/Menus"),
         PanelManager        = brackets.getModule("view/PanelManager"),
-        FileIndexManager    = brackets.getModule("project/FileIndexManager"),
         ProjectManager      = brackets.getModule("project/ProjectManager"),
-        NativeFileSystem    = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
         EditorManager       = brackets.getModule("editor/EditorManager"),
         ExtensionUtils      = brackets.getModule("utils/ExtensionUtils"),
-        CollectionUtils     = brackets.getModule("utils/CollectionUtils"),
         StringUtils         = brackets.getModule("utils/StringUtils"),
         Async               = brackets.getModule("utils/Async"),
         StatusBar           = brackets.getModule("widgets/StatusBar"),
@@ -55,6 +53,7 @@ define(function (require, exports, module) {
             /widgets/bootstrap-
             /unittest-files/
             /spec/JSUtils-test-files/
+            /spec/CodeInspection-test-files/
             /spec/CSSUtils-test-files/
             /spec/DocumentCommandHandlers-test-files/
             /spec/NodeConnection-test-files/
@@ -163,21 +162,38 @@ define(function (require, exports, module) {
         
         // Figure out what "all the things" actually are
         var lintables = [];
-        FileIndexManager.getFileInfoList("all").done(function (fileInfos) {
-            fileInfos.forEach(function (fileInfo) {
-                if (filter(fileInfo)) {  // TODO: also exclude if ".min.js" in name
-                    lintables.push(fileInfo.fullPath);
+        ProjectManager.getAllFiles().done(function (files) {
+            files.forEach(function (file) {
+                if (filter(file)) {  // TODO: also exclude if ".min.js" in name?
+                    lintables.push(file);
                 }
             });
             
             progress.begin(lintables.length);
             
             var results = {};
-            function lintOne(fullPath) {
-                var onePromise = CodeInspection.inspectFile(new NativeFileSystem.FileEntry(fullPath));
-                onePromise.done(function (oneResult) {
-                    if (oneResult && oneResult.errors.length) {
-                        results[fullPath] = oneResult;
+            function lintOne(file) {
+                var onePromise = CodeInspection.inspectFile(file);
+                onePromise.done(function (singleFileResult) {
+                    if (Array.isArray(singleFileResult)) {
+                        // >= Sprint 36: array of objects, each containing a provider & result object pair
+                        // Accumulate all providers' results into a single object representig all problems for the file
+                        singleFileResult.forEach(function (pair) {
+                            if (pair.result && pair.result.errors.length) {
+                                if (!results[file.fullPath]) {
+                                    results[file.fullPath] = { errors: [], aborted: false };
+                                }
+                                
+                                // Accumulate with any previous providers' results for this file
+                                results[file.fullPath].errors = results[file.fullPath].errors.concat(pair.result.errors);
+                                results[file.fullPath].aborted = results[file.fullPath].aborted || pair.result.aborted;
+                            }
+                        });
+                    } else {
+                        // <= Sprint 35: single result object
+                        if (singleFileResult && singleFileResult.errors.length) {
+                            results[file.fullPath] = singleFileResult;
+                        }
                     }
                     progress.increment();
                 });
@@ -245,7 +261,7 @@ define(function (require, exports, module) {
                     anyAborted = false,
                     fileList = [];
                 
-                CollectionUtils.forEach(results, function (oneResult, fullPath) {
+                _.forEach(results, function (oneResult, fullPath) {
                     var fileResult = {
                         fullPath: fullPath,
                         displayPath: ProjectManager.makeProjectRelativeIfPossible(fullPath),
