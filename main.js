@@ -40,10 +40,12 @@ define(function (require, exports, module) {
         StringUtils         = brackets.getModule("utils/StringUtils"),
         Async               = brackets.getModule("utils/Async"),
         StatusBar           = brackets.getModule("widgets/StatusBar"),
-        Dialogs             = brackets.getModule("widgets/Dialogs");
-    
+        Dialogs             = brackets.getModule("widgets/Dialogs"),
+        Preferences         = brackets.getModule("preferences/PreferencesManager");
+   
     
     var resultsPanel;
+    var prefs = Preferences.getExtensionPrefs("lint-all-the-things");    
     
     /* E.g., for Brackets core-team-owned source:
             /extensions/dev/
@@ -211,12 +213,15 @@ define(function (require, exports, module) {
     // (code borrowed from SLOC extension)
     function getExclusions() {
         var $textarea;
-        var message = "Exclude files/folders containing any of these substrings:<br><textarea id='lint-excludes' style='width:400px;height:160px'></textarea>";
+        
+        var message = "Exclude files/folders containing any of these substrings (one per line):<br><textarea id='lint-excludes' style='width:400px;height:160px'></textarea>";
         var promise = Dialogs.showModalDialog(Dialogs.DIALOG_ID_ERROR, "Lint All the Things", message);
         
         promise.done(function (btnId) {
             if (btnId === Dialogs.DIALOG_BTN_OK) {  // as opposed so dialog's "X" button
                 var substrings = $textarea.val();
+                prefs.set("exclusions", substrings);
+                prefs.save();
                 filterStrings = substrings.split("\n");
                 filterStrings = filterStrings.map(function (substr) {
                     return substr.trim();
@@ -230,8 +235,12 @@ define(function (require, exports, module) {
         $textarea = $("#lint-excludes");
         
         // prepopulate with last-used filter within session
-        // TODO: save/restore last-used string in prefs
-        $textarea.val(filterStrings.join("\n"));
+        if (typeof prefs.get("exclusions") !== "string") {
+            prefs.definePreference("exclusions", "string", true);
+            prefs.set("exclusions", "");
+            prefs.save();
+        }        
+        $textarea.val(prefs.get("exclusions"));
         $textarea.focus();
         
         return promise;
