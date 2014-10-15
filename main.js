@@ -221,7 +221,6 @@ define(function (require, exports, module) {
             if (btnId === Dialogs.DIALOG_BTN_OK) {  // as opposed so dialog's "X" button
                 var substrings = $textarea.val();
                 prefs.set("exclusions", substrings);
-                prefs.save();
                 filterStrings = substrings.split("\n");
                 filterStrings = filterStrings.map(function (substr) {
                     return substr.trim();
@@ -236,9 +235,7 @@ define(function (require, exports, module) {
         
         // prepopulate with last-used filter within session
         if (typeof prefs.get("exclusions") !== "string") {
-            prefs.definePreference("exclusions", "string", true);
-            prefs.set("exclusions", "");
-            prefs.save();
+            prefs.definePreference("exclusions", "string", "");
         }        
         $textarea.val(prefs.get("exclusions"));
         $textarea.focus();
