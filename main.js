@@ -21,7 +21,8 @@
  */
 
 
-/*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, es5: true */
+/*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4 */
+/*jshint multistr: true */
 /*global define, brackets, $, Mustache */
 
 define(function (require, exports, module) {
@@ -33,19 +34,30 @@ define(function (require, exports, module) {
         CommandManager      = brackets.getModule("command/CommandManager"),
         Commands            = brackets.getModule("command/Commands"),
         Menus               = brackets.getModule("command/Menus"),
-        PanelManager        = brackets.getModule("view/PanelManager"),
+        WorkspaceManager    = brackets.getModule("view/WorkspaceManager"),
         ProjectManager      = brackets.getModule("project/ProjectManager"),
         EditorManager       = brackets.getModule("editor/EditorManager"),
         ExtensionUtils      = brackets.getModule("utils/ExtensionUtils"),
-        StringUtils         = brackets.getModule("utils/StringUtils"),
         Async               = brackets.getModule("utils/Async"),
         StatusBar           = brackets.getModule("widgets/StatusBar"),
         Dialogs             = brackets.getModule("widgets/Dialogs"),
-        Preferences         = brackets.getModule("preferences/PreferencesManager");
+        PreferencesManager  = brackets.getModule("preferences/PreferencesManager");
    
     
     var resultsPanel;
-    var prefs = Preferences.getExtensionPrefs("lint-all-the-things");    
+    
+    var prefs = PreferencesManager.getExtensionPrefs("lint-all-the-things");
+    prefs.definePreference("exclusions", "Array", "");
+    
+    /**
+     * Want to use the current project's settings even if user happens to have a file from outside the project open. Just passing
+     * CURRENT_PROJECT should be enough, but it's not - https://github.com/adobe/brackets/pull/10422#issuecomment-73654748
+     */
+    function projPrefsContext() {
+        var context = _.cloneDeep(PreferencesManager.CURRENT_PROJECT);
+        context.path = ProjectManager.getProjectRoot().fullPath;
+        return context;
+    }
     
     /* E.g., for Brackets core-team-owned source:
             /extensions/dev/
@@ -111,7 +123,7 @@ define(function (require, exports, module) {
                             </tbody>\
                         </table>";
         
-        resultsPanel = PanelManager.createBottomPanel("all-problems", $(panelHtml), 100);
+        resultsPanel = WorkspaceManager.createBottomPanel("all-problems", $(panelHtml), 100);
         
         var $selectedRow;
         var $tableContainer = resultsPanel.$panel.find(".table-container")
@@ -166,7 +178,7 @@ define(function (require, exports, module) {
         var lintables = [];
         ProjectManager.getAllFiles().done(function (files) {
             files.forEach(function (file) {
-                if (filter(file)) {  // TODO: also exclude if ".min.js" in name?
+                if (filter(file)) {  // TODO: auto-exclude if ".min.js" in name?
                     lintables.push(file);
                 }
             });
@@ -218,15 +230,17 @@ define(function (require, exports, module) {
         var promise = Dialogs.showModalDialog(Dialogs.DIALOG_ID_ERROR, "Lint All the Things", message);
         
         promise.done(function (btnId) {
-            if (btnId === Dialogs.DIALOG_BTN_OK) {  // as opposed so dialog's "X" button
+            if (btnId === Dialogs.DIALOG_BTN_OK) {  // as opposed to dialog's "X" button
                 var substrings = $textarea.val();
-                prefs.set("exclusions", substrings);
                 filterStrings = substrings.split("\n");
                 filterStrings = filterStrings.map(function (substr) {
                     return substr.trim();
                 }).filter(function (substr) {
                     return substr !== "";
                 });
+                
+                // Save to project-specific prefs if setting exists there; else global prefs
+                prefs.set("exclusions", filterStrings, {context: projPrefsContext()});
             }
         });
         
@@ -234,10 +248,7 @@ define(function (require, exports, module) {
         $textarea = $("#lint-excludes");
         
         // prepopulate with last-used filter within session
-        if (typeof prefs.get("exclusions") !== "string") {
-            prefs.definePreference("exclusions", "string", "");
-        }        
-        $textarea.val(prefs.get("exclusions"));
+        $textarea.val(prefs.get("exclusions", projPrefsContext()).join("\n"));
         $textarea.focus();
         
         return promise;
