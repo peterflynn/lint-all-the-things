@@ -47,7 +47,7 @@ define(function (require, exports, module) {
     var resultsPanel;
     
     var prefs = PreferencesManager.getExtensionPrefs("lint-all-the-things");
-    prefs.definePreference("exclusions", "Array", "");
+    prefs.definePreference("exclusions", "Array", []);
     
     /**
      * Want to use the current project's settings even if user happens to have a file from outside the project open. Just passing

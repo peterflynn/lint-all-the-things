@@ -3,7 +3,7 @@
     "title": "Lint ALL the Things",
     "homepage": "https://github.com/peterflynn/lint-all-the-things",
     "author": "Peter Flynn",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "engines": { "brackets": ">=0.44" },
     "description": "Lint everything in your project in one batch! Optionally filter out certain files or folders, and see all the rest in a consolidated report. To get started, choose \"View > Lint Whole Project\"."
 }
